@@ -1,0 +1,714 @@
+﻿using SoccerServer.Models;
+using System.Diagnostics;
+using System.Collections.Generic;
+using System.Linq;
+using System;
+
+namespace SoccerServer.Services
+{
+    public class GameLogic
+    {
+        // 状態
+        private GameState _gameState = new GameState();
+        private bool _isPaused = false;
+        private string _closestPlayerToBall = null;
+        private string _kickOffTeam = "home";
+        private string _lastScorer = null;
+        private string _currentHolderId = null;
+        private readonly Random _random = new Random();
+
+        // --- 定数定義 ---
+        private const float FIELD_WIDTH = 800f;
+        private const float FIELD_HEIGHT = 600f;
+        private const int PLAYER_COUNT = 16;
+        private const float GLOBAL_SPEED_FACTOR = 0.7f;
+        private const float PLAYER_SPEED = 2.0f * GLOBAL_SPEED_FACTOR;
+        private const float BALL_DRAG = 0.98f;
+        private const float CENTER_Y = FIELD_HEIGHT / 2f;
+        private const float SIDE_Y_L = FIELD_HEIGHT * 0.25f;
+        private const float SIDE_Y_R = FIELD_HEIGHT * 0.75f;
+        private const float GOAL_POST_Y_TOP = FIELD_HEIGHT * 0.35f;
+        private const float GOAL_POST_Y_BOTTOM = FIELD_HEIGHT * 0.65f;
+        private const float GOAL_LINE_X_HOME = 30f;
+        private const float GOAL_LINE_X_AWAY = FIELD_WIDTH - 30f;
+        private const float GOAL_HEIGHT = 50f;
+        private const float PLAYER_KICK_RANGE = 10f;
+        private const float BALL_SPEED_FACTOR = 0.96f;
+        private const float PLAYER_SHOT_RANGE_DEFAULT = 150f;
+        private const float AI_DEFAULT_CHASE_DISTANCE = 130f;
+        private const float AI_PASS_RANGE = 250f;
+        private const float AI_FREE_SPACE_DISTANCE = 70f;
+        private const float AI_PASS_ROUTE_CLEARANCE = 20f;
+        private const float AI_DEFENSIVE_PRESS_DISTANCE = 180f;
+        private const float AI_PASS_SCORE_THRESHOLD = 80f;
+        private const float AI_PASS_SCORE_GREAT = 350f;
+        private const float AI_DRIBBLE_THRESHOLD = 130f;
+        private const float PLAYER_KICK_HEIGHT = 10f;
+        private const float GK_CATCH_HEIGHT = 20f;
+
+        private readonly Dictionary<string, float[]> HOME_POSITIONS;
+        private readonly Dictionary<string, float[]> AWAY_POSITIONS;
+
+        public GameLogic()
+        {
+            // ポジションの初期化
+            HOME_POSITIONS = new Dictionary<string, float[]>
+            {
+                { "player0", new[] { 60f, CENTER_Y } }, { "player1", new[] { 200f, 200f } }, { "player2", new[] { 200f, 400f } },
+                { "player3", new[] { 350f, CENTER_Y } }, { "player4", new[] { 350f, SIDE_Y_L } }, { "player5", new[] { 350f, SIDE_Y_R } },
+                { "player6", new[] { FIELD_WIDTH / 2f - 50f, CENTER_Y - 50f } }, { "player7", new[] { FIELD_WIDTH / 2f - 50f, CENTER_Y + 50f } }
+            };
+            AWAY_POSITIONS = new Dictionary<string, float[]>
+            {
+                { "player8", new[] { FIELD_WIDTH - 60f, CENTER_Y } }, { "player9", new[] { FIELD_WIDTH - 200f, 200f } }, { "player10", new[] { FIELD_WIDTH - 200f, 400f } },
+                { "player11", new[] { FIELD_WIDTH - 350f, CENTER_Y } }, { "player12", new[] { FIELD_WIDTH - 350f, SIDE_Y_L } }, { "player13", new[] { FIELD_WIDTH - 350f, SIDE_Y_R } },
+                { "player14", new[] { FIELD_WIDTH / 2f + 50f, CENTER_Y - 50f } }, { "player15", new[] { FIELD_WIDTH / 2f + 50f, CENTER_Y + 50f } }
+            };
+
+            InitializePlayers();
+            ResetBallAndPlayers(true);
+        }
+
+        public GameState GetState() => _gameState;
+
+        private float Hypot(float a, float b) => (float)Math.Sqrt(a * a + b * b);
+
+        private string ToRank(float value)
+        {
+            if (value >= 200) return "S";
+            if (value >= 150) return "A";
+            if (value >= 120) return "B";
+            if (value >= 100) return "C";
+            if (value >= 80) return "D";
+            return "E";
+        }
+
+        // --- 移植メソッド: InitializePlayers ---
+        private void InitializePlayers()
+        {
+            for (int i = 0; i < PLAYER_COUNT; i++)
+            {
+                string playerId = $"player{i}";
+                bool isHome = i < 8;
+                string imageKey = isHome ? "player_home" : "player_away";
+                string role = "FW";
+                float speedMult = 1f;
+                float dribbleMult = 1f;
+                float tackleMult = 1f;
+                float shotRangeMult = 1f;
+                float shotMult = 1f;
+                float passMult = 1f;
+                string displayName = playerId;
+
+                switch (i)
+                {
+                    case 0: role = "GK"; imageKey = "keeper_home"; break;
+                    case 1: role = "DF-L"; imageKey = "Karurosu_home"; displayName = "Karurosu"; speedMult = 1.5f; tackleMult = 20; break;
+                    case 2: role = "DF-R"; speedMult = 1.5f; tackleMult = 20; break;
+                    case 8: role = "GK"; imageKey = "keeper_away"; break;
+                    case 9: role = "DF-L"; speedMult = 1.5f; tackleMult = 20; break;
+                    case 7: role = "FW-R"; imageKey = "Sakuraba_home"; displayName = "Sakuraba"; speedMult = 1.2f; dribbleMult = 5; shotRangeMult = 1.8f; shotMult = 5; break;
+                    case 3: role = "MF-C"; imageKey = "Gouda_home"; displayName = "Gouda"; speedMult = 1.2f; dribbleMult = 5; shotRangeMult = 1.8f; shotMult = 5; break;
+                    case 5: role = "MF-R"; imageKey = "Takami_home"; displayName = "Takami"; speedMult = 1.8f; dribbleMult = 8; passMult = 15; break;
+                    case 14: role = "FW-L"; imageKey = "Zoro_away"; displayName = "Zoro"; speedMult = 1.2f; shotMult = 5; shotRangeMult = 1.3f; break;
+                    case 11: role = "MF-C"; imageKey = "Itoshi_away"; displayName = "Itoshi"; dribbleMult = 10; shotRangeMult = 2; passMult = 10; break;
+                    case 12: role = "MF-L"; imageKey = "Kazemaru_away"; displayName = "Kazemaru"; dribbleMult = 10; passMult = 3; speedMult = 2; break;
+                    case 10: role = "DF-R"; imageKey = "Tigiri_away"; displayName = "Tigiri"; speedMult = 1.5f; tackleMult = 20; break;
+                    case 4: case 6: case 13: case 15: break;
+                }
+
+                float baseSpeed = 70 + (float)(_random.NextDouble() * 30);
+                float baseShot = 50 + (float)(_random.NextDouble() * 50);
+                float baseDribble = 100 + (float)(_random.NextDouble() * 30);
+                float baseTackle = 70 + (float)(_random.NextDouble() * 30);
+                float finalSpeed = baseSpeed * speedMult;
+                float finalShot = baseShot * shotMult;
+                float finalDribble = baseDribble * dribbleMult;
+                float finalTackle = baseTackle * tackleMult;
+                float finalPass = 80 * passMult;
+
+                var positions = isHome ? HOME_POSITIONS : AWAY_POSITIONS;
+                float xPos = (float)(_random.NextDouble() * FIELD_WIDTH);
+                float yPos = (float)(_random.NextDouble() * FIELD_HEIGHT);
+                if (positions.TryGetValue(playerId, out float[] pos))
+                {
+                    xPos = pos[0];
+                    yPos = pos[1];
+                }
+
+                _gameState.Players[playerId] = new PlayerData
+                {
+                    Id = playerId,
+                    DisplayName = displayName.StartsWith("player") ? playerId : displayName,
+                    X = xPos,
+                    Y = yPos,
+                    VX = 0,
+                    VY = 0,
+                    Team = isHome ? "home" : "away",
+                    Role = role,
+                    ImageKey = imageKey,
+                    IsBallHolder = false,
+                    TargetX = xPos,
+                    TargetY = yPos,
+                    Stats = new PlayerStats
+                    {
+                        Speed = finalSpeed,
+                        Shot = finalShot,
+                        Pass = finalPass,
+                        Dribble = finalDribble,
+                        Tackle = finalTackle,
+                        ShotRangeMult = shotRangeMult,
+                        ShotMult = shotMult
+                    },
+                    Ranks = new PlayerRanks
+                    {
+                        Spd = ToRank(finalSpeed),
+                        Sht = ToRank(finalShot),
+                        Pas = ToRank(finalPass),
+                        Drb = ToRank(finalDribble),
+                        Tck = ToRank(finalTackle)
+                    }
+                };
+            }
+        }
+
+        // --- 移植メソッド: ResetBallAndPlayers ---
+        private void ResetBallAndPlayers(bool isInitialStart = false)
+        {
+            if (isInitialStart || _gameState.Score.Home > 0 || _gameState.Score.Away > 0)
+            {
+                _gameState.Ball = new BallData { X = FIELD_WIDTH / 2f, Y = FIELD_HEIGHT / 2f, Z = 0, VZ = 0 };
+            }
+
+            foreach (var pair in _gameState.Players)
+            {
+                var player = pair.Value;
+                var positions = player.Team == "home" ? HOME_POSITIONS : AWAY_POSITIONS;
+
+                if (positions.TryGetValue(player.Id, out float[] pos))
+                {
+                    player.X = pos[0]; player.Y = pos[1];
+                }
+                player.VX = 0; player.VY = 0; player.IsBallHolder = false; player.TargetX = player.X; player.TargetY = player.Y;
+            }
+            _currentHolderId = null;
+
+            if (isInitialStart || _gameState.Score.Home > 0 || _gameState.Score.Away > 0)
+            {
+                _gameState.Ball.X = FIELD_WIDTH / 2;
+                _gameState.Ball.Y = CENTER_Y;
+                _gameState.Ball.Z = 0;
+                _gameState.Ball.VZ = 0;
+
+                Debug.WriteLine($"[Server] Auto-kicking off. Team: {_kickOffTeam}");
+
+                if (_kickOffTeam == "home") { _gameState.Ball.VX = 10 * GLOBAL_SPEED_FACTOR; }
+                else { _gameState.Ball.VX = -10 * GLOBAL_SPEED_FACTOR; }
+
+                _gameState.Ball.VY = (float)(_random.NextDouble() - 0.5) * 24 * GLOBAL_SPEED_FACTOR;
+                _isPaused = false;
+            }
+        }
+
+        // --- 移植メソッド: UpdatePhysics ---
+        public void UpdatePhysics()
+        {
+            var ball = _gameState.Ball;
+            const float GRAVITY = -0.45f;
+            const float GROUND_BOUNCE = -0.3f;
+
+            ball.Z += ball.VZ;
+            if (ball.Z > 0)
+            {
+                ball.VZ += GRAVITY;
+            }
+            else
+            {
+                ball.Z = 0;
+                ball.VZ = (ball.VZ < -1) ? ball.VZ * GROUND_BOUNCE : 0;
+            }
+
+            ball.X += ball.VX;
+            ball.Y += ball.VY;
+            ball.VX *= BALL_DRAG;
+            ball.VY *= BALL_DRAG;
+
+            if (ball.Y < 0) { ball.Y = 0; ball.VY *= -1; }
+            if (ball.Y > FIELD_HEIGHT) { ball.Y = FIELD_HEIGHT; ball.VY *= -1; }
+
+            bool isGoalHome = ball.X > GOAL_LINE_X_AWAY && ball.Y > GOAL_POST_Y_TOP && ball.Y < GOAL_POST_Y_BOTTOM && ball.Z < GOAL_HEIGHT;
+            bool isGoalAway = ball.X < GOAL_LINE_X_HOME && ball.Y > GOAL_POST_Y_TOP && ball.Y < GOAL_POST_Y_BOTTOM && ball.Z < GOAL_HEIGHT;
+
+            if (isGoalHome || isGoalAway)
+            {
+                if (isGoalHome) { _gameState.Score.Home++; _kickOffTeam = "away"; }
+                else { _gameState.Score.Away++; _kickOffTeam = "home"; }
+
+                if (_lastScorer != null)
+                {
+                    _gameState.Scorers.Add(new ScorerData { PlayerId = _lastScorer, Time = _gameState.Time });
+                }
+
+                ResetBallAndPlayers();
+                return;
+            }
+
+            if (ball.X < 0) { ball.X = 0; ball.VX *= -1; }
+            if (ball.X > FIELD_WIDTH) { ball.X = FIELD_WIDTH; ball.VX *= -1; }
+
+            // プレイヤーの移動
+            foreach (var player in _gameState.Players.Values)
+            {
+                float angle = (float)Math.Atan2(player.TargetY - player.Y, player.TargetX - player.X);
+                float playerSpeed = (player.Stats.Speed / 100) * PLAYER_SPEED;
+                float dist = Hypot(player.TargetX - player.X, player.TargetY - player.Y);
+
+                if (dist > playerSpeed)
+                {
+                    player.VX = (float)Math.Cos(angle) * playerSpeed;
+                    player.VY = (float)Math.Sin(angle) * playerSpeed;
+                    player.X += player.VX;
+                    player.Y += player.VY;
+                }
+                else
+                {
+                    player.X = player.TargetX;
+                    player.Y = player.TargetY;
+                    player.VX = 0;
+                    player.VY = 0;
+                }
+            }
+
+            // ドリブル処理
+            if (_currentHolderId != null && _gameState.Players.TryGetValue(_currentHolderId, out var holder) && holder.IsBallHolder)
+            {
+                float playerSpeed = Hypot(holder.VX, holder.VY);
+                if (playerSpeed > 0.1f)
+                {
+                    float angle = (float)Math.Atan2(holder.VY, holder.VX);
+                    ball.X = holder.X + (float)Math.Cos(angle) * 10f;
+                    ball.Y = holder.Y + (float)Math.Sin(angle) * 10f;
+                    ball.VX = holder.VX * BALL_SPEED_FACTOR * (holder.Stats.Dribble / 100f);
+                    ball.VY = holder.VY * BALL_SPEED_FACTOR * (holder.Stats.Dribble / 100f);
+                    ball.Z = 0;
+                    ball.VZ = 0;
+                }
+                else
+                {
+                    ball.X = holder.X + 5f;
+                    ball.Y = holder.Y;
+                    ball.VX *= BALL_DRAG;
+                    ball.VY *= BALL_DRAG;
+                    ball.Z = 0;
+                    ball.VZ = 0;
+                }
+            }
+        }
+
+        // --- 移植メソッド: UpdateAI (★AIロジックを実装★) ---
+
+        private bool IsPlayerFree(PlayerData player)
+        {
+            foreach (var opponent in _gameState.Players.Values)
+            {
+                if (opponent.Team != player.Team)
+                {
+                    float dist = Hypot(player.X - opponent.X, player.Y - opponent.Y);
+                    if (dist < AI_FREE_SPACE_DISTANCE)
+                    {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        private PlayerData FindNearestOpponent(PlayerData player)
+        {
+            float closestDist = float.MaxValue;
+            PlayerData nearestOpponent = null;
+            foreach (var opponent in _gameState.Players.Values)
+            {
+                if (opponent.Team != player.Team)
+                {
+                    float dist = Hypot(player.X - opponent.X, player.Y - opponent.Y);
+                    if (dist < closestDist)
+                    {
+                        closestDist = dist;
+                        nearestOpponent = opponent;
+                    }
+                }
+            }
+            return nearestOpponent;
+        }
+
+        private bool IsPassRouteClear(PlayerData passer, PlayerData targetPlayer)
+        {
+            float pX = passer.X, pY = passer.Y;
+            float tX = targetPlayer.X, tY = targetPlayer.Y;
+            float lineLengthSq = (float)(Math.Pow(tX - pX, 2) + Math.Pow(tY - pY, 2));
+            if (lineLengthSq < (AI_PASS_ROUTE_CLEARANCE * AI_PASS_ROUTE_CLEARANCE)) return true;
+
+            foreach (var opponent in _gameState.Players.Values)
+            {
+                if (opponent.Team == passer.Team) continue;
+                float oX = opponent.X, oY = opponent.Y;
+                if (oX < Math.Min(pX, tX) - AI_PASS_ROUTE_CLEARANCE || oX > Math.Max(pX, tX) + AI_PASS_ROUTE_CLEARANCE ||
+                    oY < Math.Min(pY, tY) - AI_PASS_ROUTE_CLEARANCE || oY > Math.Max(pY, tY) + AI_PASS_ROUTE_CLEARANCE)
+                {
+                    continue;
+                }
+                float t = ((oX - pX) * (tX - pX) + (oY - pY) * (tY - pY)) / lineLengthSq;
+                float closestX, closestY;
+                if (t < 0) { closestX = pX; closestY = pY; }
+                else if (t > 1) { closestX = tX; closestY = tY; }
+                else { closestX = pX + t * (tX - pX); closestY = pY + t * (tY - pY); }
+
+                float distToLine = Hypot(oX - closestX, oY - closestY);
+                if (distToLine < AI_PASS_ROUTE_CLEARANCE) return false;
+            }
+            return true;
+        }
+
+        private (PlayerData target, float score) FindBestPassTarget(PlayerData passer, string[] rolesToFind)
+        {
+            float bestScore = -float.MaxValue;
+            PlayerData targetPlayer = null;
+            string myTeam = passer.Team;
+            float enemyGoalX = (myTeam == "home") ? FIELD_WIDTH : 0;
+            float enemyGoalY = CENTER_Y;
+
+            // GK Logic
+            if (passer.Role == "GK")
+            {
+                float closestDist = float.MaxValue;
+                PlayerData bestLobTarget = null;
+                float bestLobScore = -float.MaxValue;
+
+                foreach (var teammate in _gameState.Players.Values)
+                {
+                    if (teammate.Team == myTeam && teammate.Id != passer.Id && rolesToFind.Any(r => teammate.Role.StartsWith(r)))
+                    {
+                        float dist = Hypot(passer.X - teammate.X, passer.Y - teammate.Y);
+                        if (dist < AI_PASS_RANGE && IsPlayerFree(teammate))
+                        {
+                            if (teammate.Role.StartsWith("DF") || teammate.Role.StartsWith("MF"))
+                            {
+                                if (dist < closestDist && IsPassRouteClear(passer, teammate))
+                                {
+                                    closestDist = dist;
+                                    targetPlayer = teammate; // Ground pass
+                                }
+                            }
+                            else if (teammate.Role.StartsWith("FW") || teammate.Role.StartsWith("MF"))
+                            {
+                                float distToGoal = Hypot(teammate.X - enemyGoalX, teammate.Y - enemyGoalY);
+                                float score = (FIELD_WIDTH - distToGoal);
+                                if (score > bestLobScore)
+                                {
+                                    bestLobScore = score;
+                                    bestLobTarget = teammate;
+                                }
+                            }
+                        }
+                    }
+                }
+                var bestGkTarget = targetPlayer ?? bestLobTarget;
+                return (bestGkTarget, bestGkTarget != null ? 200 : -float.MaxValue);
+            }
+
+            // Field Player Logic
+            foreach (var teammate in _gameState.Players.Values)
+            {
+                if (teammate.Team == myTeam && teammate.Id != passer.Id && rolesToFind.Any(r => teammate.Role.StartsWith(r)))
+                {
+                    float distToPasser = Hypot(passer.X - teammate.X, passer.Y - teammate.Y);
+                    if (distToPasser < AI_PASS_RANGE)
+                    {
+                        float freeBonus = IsPlayerFree(teammate) ? 100 : 0;
+                        float distToGoal = Hypot(teammate.X - enemyGoalX, teammate.Y - enemyGoalY);
+                        float goalBonus = (FIELD_WIDTH - distToGoal);
+                        float routeClearBonus = IsPassRouteClear(passer, teammate) ? 50 : -200;
+                        float passScore = freeBonus + goalBonus + routeClearBonus;
+
+                        if (routeClearBonus < 0 && (passer.Role.StartsWith("DF") || passer.Role.StartsWith("MF")) && teammate.Role.StartsWith("FW"))
+                        {
+                            float distBonus = (distToPasser / AI_PASS_RANGE) * 50;
+                            passScore = freeBonus + goalBonus + distBonus;
+                        }
+
+                        if (passScore > bestScore)
+                        {
+                            bestScore = passScore;
+                            targetPlayer = teammate;
+                        }
+                    }
+                }
+            }
+            return (targetPlayer, bestScore);
+        }
+
+        private void MakePass(PlayerData player, PlayerData targetPlayer, bool isLobbed = false)
+        {
+            const float basePassPower = 12f;
+            float passPower = basePassPower * (player.Stats.Pass / 100f);
+            float targetX = targetPlayer.X + targetPlayer.VX * 5;
+            float targetY = targetPlayer.Y + targetPlayer.VY * 5;
+            float distToTarget = Hypot(targetY - player.Y, targetX - player.X);
+
+            float angle = (float)Math.Atan2(targetY - player.Y, targetX - player.X);
+            _gameState.Ball.VX = (float)Math.Cos(angle) * passPower * GLOBAL_SPEED_FACTOR;
+            _gameState.Ball.VY = (float)Math.Sin(angle) * passPower * GLOBAL_SPEED_FACTOR;
+
+            _gameState.Ball.VZ = isLobbed ? 5 + (distToTarget / 50f) : 0;
+
+            player.IsBallHolder = false;
+            _currentHolderId = null;
+            _closestPlayerToBall = null;
+            Debug.WriteLine($"[Server AI] {player.DisplayName} passed to {targetPlayer.DisplayName} (Lob: {isLobbed})");
+        }
+
+        public void UpdateAI()
+        {
+            float minDistance = float.MaxValue;
+            string closestPlayerId = null;
+            string newHolderId = null;
+
+            // 1. Find closest player to ball
+            foreach (var player in _gameState.Players.Values)
+            {
+                float distance = Hypot(player.X - _gameState.Ball.X, player.Y - _gameState.Ball.Y);
+                if (distance < minDistance)
+                {
+                    minDistance = distance;
+                    closestPlayerId = player.Id;
+                }
+            }
+
+            // 2. Determine ball holder (with Z height check)
+            if (minDistance < PLAYER_KICK_RANGE)
+            {
+                if (string.IsNullOrEmpty(closestPlayerId)) return;
+                var closer = _gameState.Players[closestPlayerId];
+
+                // ★★★ 修正点: クラッシュ原因 (ArgumentNullException) の回避 ★★★
+                PlayerData current = null;
+                if (!string.IsNullOrEmpty(_currentHolderId))
+                {
+                    _gameState.Players.TryGetValue(_currentHolderId, out current);
+                }
+                // ★★★ 修正点 ここまで ★★★
+
+                bool canTouch = (closer.Role == "GK") ?
+                                (_gameState.Ball.Z < GK_CATCH_HEIGHT) :
+                                (_gameState.Ball.Z < PLAYER_KICK_HEIGHT);
+
+                if (canTouch)
+                {
+                    if (current != null && current.Role == "GK" && current.Team != closer.Team && _gameState.Ball.Z < GK_CATCH_HEIGHT)
+                    {
+                        newHolderId = _currentHolderId; // GK invincible logic
+                    }
+                    else
+                    {
+                        newHolderId = closestPlayerId;
+                    }
+                }
+                else newHolderId = null;
+            }
+            else newHolderId = null;
+
+            _currentHolderId = newHolderId;
+            _closestPlayerToBall = newHolderId;
+            foreach (var player in _gameState.Players.Values)
+            {
+                player.IsBallHolder = (player.Id == newHolderId);
+                if (player.IsBallHolder) _lastScorer = player.Id;
+            }
+
+            // 4. AI Action Logic
+            foreach (var player in _gameState.Players.Values)
+            {
+                if (player?.Stats == null) continue;
+
+                string myTeam = player.Team;
+                float enemyGoalX = (myTeam == "home") ? FIELD_WIDTH : 0;
+                float enemyGoalY = CENTER_Y;
+                float myGoalX = (myTeam == "home") ? 0 : FIELD_WIDTH;
+
+                float[] basePos = null;
+                if (myTeam == "home") HOME_POSITIONS.TryGetValue(player.Id, out basePos);
+                else AWAY_POSITIONS.TryGetValue(player.Id, out basePos);
+
+                float distToBall = Hypot(player.X - _gameState.Ball.X, player.Y - _gameState.Ball.Y);
+
+                // ★★★ 修正点: teamHasBall の Null チェック ★★★
+                bool teamHasBall = !string.IsNullOrEmpty(_currentHolderId)
+                                   && _gameState.Players.TryGetValue(_currentHolderId, out PlayerData holder)
+                                   && holder.Team == myTeam;
+
+                // --- Ball Holder Logic ---
+                if (player.IsBallHolder)
+                {
+                    // GK
+                    if (player.Role == "GK")
+                    {
+                        var passDecision = FindBestPassTarget(player, new[] { "DF", "MF", "FW" });
+                        if (passDecision.target != null)
+                        {
+                            bool isLobbed = passDecision.target.Role.StartsWith("FW");
+                            MakePass(player, passDecision.target, isLobbed);
+                        }
+                        else // Clear ball
+                        {
+                            float angle = (float)Math.Atan2(CENTER_Y - player.Y, enemyGoalX - player.X);
+                            _gameState.Ball.VX = (float)Math.Cos(angle) * 12;
+                            _gameState.Ball.VY = (float)Math.Sin(angle) * 12;
+                            _gameState.Ball.VZ = 10;
+                            player.IsBallHolder = false; _currentHolderId = null; _closestPlayerToBall = null;
+                        }
+                        continue;
+                    }
+
+                    // Shot
+                    float distanceToGoal = Hypot(player.X - enemyGoalX, player.Y - enemyGoalY);
+                    float shotRange = PLAYER_SHOT_RANGE_DEFAULT * (player.Stats.ShotRangeMult);
+                    if (distanceToGoal < shotRange)
+                    {
+                        float baseShotPower = 18f;
+                        float shotPower = baseShotPower * (player.Stats.Shot / 100f) * (player.Stats.ShotMult);
+                        float targetYAdjust = (float)(_random.NextDouble() - 0.5) * (GOAL_POST_Y_BOTTOM - GOAL_POST_Y_TOP);
+                        float angleAdjusted = (float)Math.Atan2((enemyGoalY + targetYAdjust) - player.Y, enemyGoalX - player.X);
+                        _gameState.Ball.VX = (float)Math.Cos(angleAdjusted) * shotPower * GLOBAL_SPEED_FACTOR;
+                        _gameState.Ball.VY = (float)Math.Sin(angleAdjusted) * shotPower * GLOBAL_SPEED_FACTOR;
+                        _gameState.Ball.VZ = 2; // Low shot
+                        player.IsBallHolder = false; _currentHolderId = null; _closestPlayerToBall = null;
+                        continue;
+                    }
+
+                    // Pass
+                    if (player.Role.StartsWith("DF") || player.Role.StartsWith("MF") || player.Role.StartsWith("FW"))
+                    {
+                        var passDecision = FindBestPassTarget(player, new[] { "FW", "MF" });
+                        bool shouldPass = false;
+
+                        if (passDecision.target != null)
+                        {
+                            if (passDecision.score > AI_PASS_SCORE_GREAT) shouldPass = true;
+                            else if (passDecision.score > AI_PASS_SCORE_THRESHOLD)
+                            {
+                                if (player.Stats.Dribble < AI_DRIBBLE_THRESHOLD) shouldPass = true;
+                                else Debug.WriteLine($"[Server AI] {player.DisplayName} chose to dribble (Dribble: {player.Stats.Dribble}, Pass Score: {passDecision.score})");
+                            }
+                            else Debug.WriteLine($"[Server AI] {player.DisplayName} pass cancelled (Score: {passDecision.score})");
+                        }
+
+                        if (shouldPass)
+                        {
+                            var targetPlayer = passDecision.target;
+                            bool isLobbed = (player.Role.StartsWith("DF") && targetPlayer.Role.StartsWith("FW")) ||
+                                            (player.Role.StartsWith("MF") && targetPlayer.Role.StartsWith("FW") && !IsPassRouteClear(player, targetPlayer));
+                            MakePass(player, targetPlayer, isLobbed);
+                            continue;
+                        }
+                    }
+
+                    // Dribble
+                    var nearestOpponent = FindNearestOpponent(player);
+                    float dribbleTargetX = enemyGoalX;
+                    float dribbleTargetY = enemyGoalY;
+                    if (nearestOpponent != null)
+                    {
+                        float distToOpponent = Hypot(player.X - nearestOpponent.X, player.Y - nearestOpponent.Y);
+                        bool isOpponentInFront = (myTeam == "home") ? (nearestOpponent.X > player.X) : (nearestOpponent.X < player.X);
+                        if (distToOpponent < 60 && isOpponentInFront)
+                        {
+                            dribbleTargetY = (player.Y < CENTER_Y) ? player.Y - 100 : player.Y + 100;
+                            dribbleTargetX = player.X + (myTeam == "home" ? 50 : -50);
+                        }
+                    }
+                    player.TargetX = dribbleTargetX;
+                    player.TargetY = dribbleTargetY;
+                }
+                // --- Non-Ball Holder Logic ---
+                else
+                {
+                    // GK
+                    if (player.Role == "GK")
+                    {
+                        player.TargetX = (myTeam == "home") ? GOAL_LINE_X_HOME + 20 : GOAL_LINE_X_AWAY - 20;
+                        player.TargetY = Math.Max(GOAL_POST_Y_TOP, Math.Min(GOAL_POST_Y_BOTTOM, _gameState.Ball.Y));
+                        continue;
+                    }
+
+                    // DF
+                    if (player.Role.StartsWith("DF") && basePos != null)
+                    {
+                        bool ballOnEnemySide = (myTeam == "home" && _gameState.Ball.X > FIELD_WIDTH / 2) || (myTeam == "away" && _gameState.Ball.X < FIELD_WIDTH / 2);
+                        if (teamHasBall && ballOnEnemySide) // Overlap
+                        {
+                            player.TargetX = basePos[0] + (myTeam == "home" ? 200 : -200);
+                            player.TargetY = basePos[1];
+                            continue;
+                        }
+                        if (distToBall > AI_DEFAULT_CHASE_DISTANCE) // Default defense
+                        {
+                            player.TargetX = basePos[0] + (_gameState.Ball.X - FIELD_WIDTH / 2) * 0.2f;
+                            player.TargetY = basePos[1] + (_gameState.Ball.Y - CENTER_Y) * 0.2f;
+                            continue;
+                        }
+                    }
+
+                    // FW
+                    if (player.Role.StartsWith("FW"))
+                    {
+                        float targetX, targetY;
+                        bool ballInMyHalf = (myTeam == "home" && _gameState.Ball.X < FIELD_WIDTH / 2) || (myTeam == "away" && _gameState.Ball.X > FIELD_WIDTH / 2);
+
+                        if (!teamHasBall && ballInMyHalf && distToBall < AI_DEFENSIVE_PRESS_DISTANCE * 1.5)
+                        {
+                            targetX = _gameState.Ball.X; // Press back
+                            targetY = _gameState.Ball.Y;
+                        }
+                        else // Wait near enemy penalty area
+                        {
+                            targetX = (myTeam == "home") ? FIELD_WIDTH - 170 : 170;
+                            targetY = (basePos != null) ? basePos[1] + (_gameState.Ball.Y - CENTER_Y) * 0.1f : CENTER_Y;
+                            if (distToBall < AI_DEFAULT_CHASE_DISTANCE)
+                            {
+                                targetX = _gameState.Ball.X;
+                                targetY = _gameState.Ball.Y;
+                            }
+                        }
+                        player.TargetX = targetX;
+                        player.TargetY = targetY;
+                        continue;
+                    }
+
+                    // Default: Chase ball
+                    player.TargetX = _gameState.Ball.X;
+                    player.TargetY = _gameState.Ball.Y;
+                }
+            }
+        }
+
+        // --- UpdateGameのメインロジック ---
+        public void UpdateGame()
+        {
+            if (_isPaused || _gameState.MatchEnded) return;
+
+            try
+            {
+                UpdateAI();
+                UpdatePhysics();
+
+                if (_gameState.Time > 0) _gameState.Time--;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Server Error] Error in game loop: {ex.Message}");
+                _isPaused = true;
+            }
+        }
+    }
+}
