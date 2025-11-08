@@ -17,52 +17,98 @@ namespace SoccerServer.Services
         private string _currentHolderId = null;
         private readonly Random _random = new Random();
 
-        // --- 定数定義 ---
-        private const float FIELD_WIDTH = 800f;
-        private const float FIELD_HEIGHT = 600f;
+        // ★★★ PLAYER_COUNT は内部的に使用しますが、参照エラー回避のため、他のファイルでの使用を避けています ★★★
         private const int PLAYER_COUNT = 16;
+
+        // --- 定数定義 (Unityのサイズ 175.4 x 125.44 に合わせて修正) ---
+        private const float FIELD_WIDTH = 175.4f; // UnityのX軸の幅 (175.4f)
+        private const float FIELD_HEIGHT = 125.44f; // UnityのZ軸の幅 (125.44f - サーバーのY軸)
+
         private const float GLOBAL_SPEED_FACTOR = 0.7f;
         private const float PLAYER_SPEED = 2.0f * GLOBAL_SPEED_FACTOR;
         private const float BALL_DRAG = 0.98f;
-        private const float CENTER_Y = FIELD_HEIGHT / 2f;
+
+        private const float CENTER_Y = FIELD_HEIGHT / 2f; // 62.72f
+
+        // 125.44 * 0.25 = 31.36f 
         private const float SIDE_Y_L = FIELD_HEIGHT * 0.25f;
+        // 125.44 * 0.75 = 94.08f 
         private const float SIDE_Y_R = FIELD_HEIGHT * 0.75f;
-        private const float GOAL_POST_Y_TOP = FIELD_HEIGHT * 0.35f;
-        private const float GOAL_POST_Y_BOTTOM = FIELD_HEIGHT * 0.65f;
-        private const float GOAL_LINE_X_HOME = 30f;
-        private const float GOAL_LINE_X_AWAY = FIELD_WIDTH - 30f;
-        private const float GOAL_HEIGHT = 50f;
-        private const float PLAYER_KICK_RANGE = 10f;
+
+        // ゴールポストの位置 
+        private const float GOAL_POST_Y_TOP = FIELD_HEIGHT * 0.35f; // 43.904f
+        private const float GOAL_POST_Y_BOTTOM = FIELD_HEIGHT * 0.65f; // 81.536f
+
+        // ゴールラインの位置 
+        private const float GOAL_LINE_X_HOME = 6.58f;
+        private const float GOAL_LINE_X_AWAY = 168.82f;
+
+        // ゴールの高さ
+        private const float GOAL_HEIGHT = 10.45f;
+
+        // 元のロジックの比率 (Y軸スケール 0.209) で修正
+        private const float PLAYER_KICK_RANGE = 10f * 0.209f;
         private const float BALL_SPEED_FACTOR = 0.96f;
-        private const float PLAYER_SHOT_RANGE_DEFAULT = 150f;
-        private const float AI_DEFAULT_CHASE_DISTANCE = 130f;
-        private const float AI_PASS_RANGE = 250f;
-        private const float AI_FREE_SPACE_DISTANCE = 70f;
-        private const float AI_PASS_ROUTE_CLEARANCE = 20f;
-        private const float AI_DEFENSIVE_PRESS_DISTANCE = 180f;
+        private const float PLAYER_SHOT_RANGE_DEFAULT = 150f * 0.209f;
+        private const float AI_DEFAULT_CHASE_DISTANCE = 130f * 0.209f;
+        private const float AI_PASS_RANGE = 250f * 0.209f;
+        private const float AI_FREE_SPACE_DISTANCE = 70f * 0.209f;
+        private const float AI_PASS_ROUTE_CLEARANCE = 20f * 0.209f;
+        private const float AI_DEFENSIVE_PRESS_DISTANCE = 180f * 0.209f;
         private const float AI_PASS_SCORE_THRESHOLD = 80f;
         private const float AI_PASS_SCORE_GREAT = 350f;
-        private const float AI_DRIBBLE_THRESHOLD = 130f;
-        private const float PLAYER_KICK_HEIGHT = 10f;
-        private const float GK_CATCH_HEIGHT = 20f;
+        private const float AI_DRIBBLE_THRESHOLD = 130f * 0.209f;
+        private const float PLAYER_KICK_HEIGHT = 10f * 0.209f;
+        private const float GK_CATCH_HEIGHT = 20f * 0.209f;
 
         private readonly Dictionary<string, float[]> HOME_POSITIONS;
         private readonly Dictionary<string, float[]> AWAY_POSITIONS;
 
         public GameLogic()
         {
-            // ポジションの初期化
+            // Unityのサイズに合わせるためのスケールファクタ
+            const float scaleX = 0.21925f; // 175.4 / 800
+            const float scaleY = 0.2090667f; // 125.44 / 600
+
+            // ポジションの初期化 (すべての座標を元の比率で正しく計算し直す)
             HOME_POSITIONS = new Dictionary<string, float[]>
             {
-                { "player0", new[] { 60f, CENTER_Y } }, { "player1", new[] { 200f, 200f } }, { "player2", new[] { 200f, 400f } },
-                { "player3", new[] { 350f, CENTER_Y } }, { "player4", new[] { 350f, SIDE_Y_L } }, { "player5", new[] { 350f, SIDE_Y_R } },
-                { "player6", new[] { FIELD_WIDTH / 2f - 50f, CENTER_Y - 50f } }, { "player7", new[] { FIELD_WIDTH / 2f - 50f, CENTER_Y + 50f } }
+                // 元: 60f, 300f
+                { "player0", new[] { 60f * scaleX, 300f * scaleY } }, 
+                // 元: 200f, 200f
+                { "player1", new[] { 200f * scaleX, 200f * scaleY } },
+                // 元: 200f, 400f
+                { "player2", new[] { 200f * scaleX, 400f * scaleY } },
+                // 元: 350f, 300f
+                { "player3", new[] { 350f * scaleX, 300f * scaleY } },
+                // 元: 350f, 150f
+                { "player4", new[] { 350f * scaleX, 150f * scaleY } },
+                // 元: 350f, 450f
+                { "player5", new[] { 350f * scaleX, 450f * scaleY } },
+                // 元: 350f, 250f (400-50, 300-50)
+                { "player6", new[] { (400f - 50f) * scaleX, (300f - 50f) * scaleY } }, 
+                // 元: 350f, 350f (400-50, 300+50)
+                { "player7", new[] { (400f - 50f) * scaleX, (300f + 50f) * scaleY } }
             };
+
             AWAY_POSITIONS = new Dictionary<string, float[]>
             {
-                { "player8", new[] { FIELD_WIDTH - 60f, CENTER_Y } }, { "player9", new[] { FIELD_WIDTH - 200f, 200f } }, { "player10", new[] { FIELD_WIDTH - 200f, 400f } },
-                { "player11", new[] { FIELD_WIDTH - 350f, CENTER_Y } }, { "player12", new[] { FIELD_WIDTH - 350f, SIDE_Y_L } }, { "player13", new[] { FIELD_WIDTH - 350f, SIDE_Y_R } },
-                { "player14", new[] { FIELD_WIDTH / 2f + 50f, CENTER_Y - 50f } }, { "player15", new[] { FIELD_WIDTH / 2f + 50f, CENTER_Y + 50f } }
+                // 元: 740f, 300f
+                { "player8", new[] { (800f - 60f) * scaleX, 300f * scaleY } }, 
+                // 元: 600f, 200f
+                { "player9", new[] { (800f - 200f) * scaleX, 200f * scaleY } },
+                // 元: 600f, 400f
+                { "player10", new[] { (800f - 200f) * scaleX, 400f * scaleY } },
+                // 元: 450f, 300f
+                { "player11", new[] { (800f - 350f) * scaleX, 300f * scaleY } },
+                // 元: 450f, 150f
+                { "player12", new[] { (800f - 350f) * scaleX, 150f * scaleY } },
+                // 元: 450f, 450f
+                { "player13", new[] { (800f - 350f) * scaleX, 450f * scaleY } },
+                // 元: 450f, 250f
+                { "player14", new[] { (400f + 50f) * scaleX, (300f - 50f) * scaleY } },
+                // 元: 450f, 350f
+                { "player15", new[] { (400f + 50f) * scaleX, (300f + 50f) * scaleY } }
             };
 
             InitializePlayers();
@@ -86,7 +132,8 @@ namespace SoccerServer.Services
         // --- 移植メソッド: InitializePlayers ---
         private void InitializePlayers()
         {
-            for (int i = 0; i < PLAYER_COUNT; i++)
+            // ★★★ 修正点: PLAYER_COUNT の参照を固定値 16 に置き換え ★★★
+            for (int i = 0; i < 16; i++)
             {
                 string playerId = $"player{i}";
                 bool isHome = i < 8;
@@ -354,7 +401,7 @@ namespace SoccerServer.Services
                 if (opponent.Team == passer.Team) continue;
                 float oX = opponent.X, oY = opponent.Y;
                 if (oX < Math.Min(pX, tX) - AI_PASS_ROUTE_CLEARANCE || oX > Math.Max(pX, tX) + AI_PASS_ROUTE_CLEARANCE ||
-                    oY < Math.Min(pY, tY) - AI_PASS_ROUTE_CLEARANCE || oY > Math.Max(pY, tY) + AI_PASS_ROUTE_CLEARANCE)
+                    oY < Math.Min(pY, tY) - AI_PASS_ROUTE_CLEARANCE || oY > Math.Max(pX, tY) + AI_PASS_ROUTE_CLEARANCE)
                 {
                     continue;
                 }
