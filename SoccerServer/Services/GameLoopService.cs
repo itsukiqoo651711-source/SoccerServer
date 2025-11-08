@@ -8,7 +8,7 @@ namespace SoccerServer.Services
     {
         private readonly GameLogic _gameLogic;
         private readonly WebSocketManager _webSocketManager;
-        private Timer? _timer; // Null許容型に変更
+        private Timer _timer;
         private const int TICK_RATE = 60; // 60 FPS
 
         // JSONシリアライザーの設定は、ここで削除し、UpdateGameState内でSystem.Text.Jsonの標準を使用
@@ -30,7 +30,7 @@ namespace SoccerServer.Services
         }
 
         // 60FPSで実行されるメイン処理
-        private async void UpdateGameState(object? state)
+        private async void UpdateGameState(object state)
         {
             try
             {

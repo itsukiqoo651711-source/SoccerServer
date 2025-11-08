@@ -36,7 +36,6 @@ namespace SoccerServer.Models
         [JsonPropertyName("shotRangeMult")]
         public float ShotRangeMult { get; set; } = 1;
 
-        // ★★★ 修正点: CS1061エラーを解消するため ShotMult を追加 ★★★
         [JsonPropertyName("shotMult")]
         public float ShotMult { get; set; } = 1;
     }
@@ -44,26 +43,25 @@ namespace SoccerServer.Models
     // server.js の player.ranks に対応
     public class PlayerRanks
     {
-        // ★ Null許容型 (?) に変更
         [JsonPropertyName("spd")]
-        public string? Spd { get; set; }
+        public string Spd { get; set; }
         [JsonPropertyName("sht")]
-        public string? Sht { get; set; }
+        public string Sht { get; set; }
         [JsonPropertyName("pas")]
-        public string? Pas { get; set; }
+        public string Pas { get; set; }
         [JsonPropertyName("drb")]
-        public string? Drb { get; set; }
+        public string Drb { get; set; }
         [JsonPropertyName("tck")]
-        public string? Tck { get; set; }
+        public string Tck { get; set; }
     }
 
     // server.js の gameState.players[id] に対応
     public class PlayerData
     {
         [JsonPropertyName("id")]
-        public string? Id { get; set; }
+        public string Id { get; set; }
         [JsonPropertyName("displayName")]
-        public string? DisplayName { get; set; }
+        public string DisplayName { get; set; }
         [JsonPropertyName("x")]
         public float X { get; set; }
         [JsonPropertyName("y")]
@@ -73,11 +71,11 @@ namespace SoccerServer.Models
         [JsonPropertyName("vy")]
         public float VY { get; set; } = 0;
         [JsonPropertyName("team")]
-        public string? Team { get; set; }
+        public string Team { get; set; }
         [JsonPropertyName("role")]
-        public string? Role { get; set; }
+        public string Role { get; set; }
         [JsonPropertyName("imageKey")]
-        public string? ImageKey { get; set; }
+        public string ImageKey { get; set; }
         [JsonPropertyName("isBallHolder")]
         public bool IsBallHolder { get; set; } = false;
         [JsonPropertyName("targetX")]
@@ -85,9 +83,9 @@ namespace SoccerServer.Models
         [JsonPropertyName("targetY")]
         public float TargetY { get; set; }
         [JsonPropertyName("stats")]
-        public PlayerStats? Stats { get; set; } // Null許容型
+        public PlayerStats Stats { get; set; }
         [JsonPropertyName("ranks")]
-        public PlayerRanks? Ranks { get; set; } // Null許容型
+        public PlayerRanks Ranks { get; set; }
 
         // Unityクライアントが z と vz を期待しているため追加
         [JsonPropertyName("z")]
@@ -109,7 +107,7 @@ namespace SoccerServer.Models
     public class ScorerData
     {
         [JsonPropertyName("playerId")]
-        public string? PlayerId { get; set; } // Null許容型
+        public string PlayerId { get; set; }
         [JsonPropertyName("time")]
         public int Time { get; set; }
     }
@@ -118,17 +116,17 @@ namespace SoccerServer.Models
     public class GameState
     {
         [JsonPropertyName("players")]
-        public Dictionary<string, PlayerData>? Players { get; set; } = new Dictionary<string, PlayerData>();
+        public Dictionary<string, PlayerData> Players { get; set; } = new Dictionary<string, PlayerData>();
 
         [JsonPropertyName("ball")]
-        public BallData? Ball { get; set; } = new BallData();
+        public BallData Ball { get; set; } = new BallData();
         [JsonPropertyName("score")]
-        public ScoreData? Score { get; set; } = new ScoreData();
+        public ScoreData Score { get; set; } = new ScoreData();
         [JsonPropertyName("time")]
         public int Time { get; set; } = 3 * 60;
         [JsonPropertyName("matchEnded")]
         public bool MatchEnded { get; set; } = false;
         [JsonPropertyName("scorers")]
-        public List<ScorerData>? Scorers { get; set; } = new List<ScorerData>();
+        public List<ScorerData> Scorers { get; set; } = new List<ScorerData>();
     }
 }
