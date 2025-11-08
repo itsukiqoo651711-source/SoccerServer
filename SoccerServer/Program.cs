@@ -62,12 +62,15 @@ namespace SoccerServer
                             // 曖昧な参照を避けるため完全指定
                             var webSocketManager = services.GetRequiredService<SoccerServer.Services.WebSocketManager>();
 
+                            // ★★★ GameLogic を取得 ★★★
+                            var gameLogic = services.GetRequiredService<GameLogic>();
+
                             string socketId = Guid.NewGuid().ToString();
                             webSocketManager.AddSocket(socketId, webSocket);
                             Console.WriteLine($"[Server] WebSocket connected: {socketId}");
 
-                            // 接続が切断されるまで待機 (切断管理)
-                            await HandleWebSocketConnection(webSocket, socketId, webSocketManager);
+                            // ★★★ GameLogic を渡すように変更 ★★★
+                            await HandleWebSocketConnection(webSocket, socketId, webSocketManager, gameLogic);
                         }
                     }
                     else
@@ -87,16 +90,36 @@ namespace SoccerServer
 
         // WebSocket 接続の生存管理 (Program クラス内部に移動)
         // 曖昧な参照を避けるため引数で完全指定
-        private static async Task HandleWebSocketConnection(WebSocket webSocket, string socketId, SoccerServer.Services.WebSocketManager manager)
+
+        // ★★★ GameLogic を引数に追加 ★★★
+        private static async Task HandleWebSocketConnection(WebSocket webSocket, string socketId, SoccerServer.Services.WebSocketManager manager, GameLogic gameLogic)
         {
             var buffer = new byte[1024 * 4];
 
-            // 接続が開いている間、ダミーの受信ループを実行
+            // 接続が開いている間、受信ループを実行
             WebSocketReceiveResult result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
 
             while (!result.CloseStatus.HasValue)
             {
-                // TODO: クライアントからのメッセージを処理する場合はここ
+                // ★★★ クライアントからのメッセージを処理 ★★★
+                if (result.MessageType == WebSocketMessageType.Text)
+                {
+                    string message = Encoding.UTF8.GetString(buffer, 0, result.Count);
+                    Console.WriteLine($"[Server] Received from {socketId}: {message}");
+
+                    // クライアントからの指示で GameLogic を操作
+                    switch (message)
+                    {
+                        case "START_GAME":
+                            gameLogic.StartGame();
+                            break;
+                        case "CONTINUE_GAME":
+                            gameLogic.ContinueGame();
+                            break;
+                    }
+                }
+                // ★★★ ここまで ★★★
+
                 result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
             }
 

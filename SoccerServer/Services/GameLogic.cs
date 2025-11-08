@@ -17,12 +17,18 @@ namespace SoccerServer.Services
         private string _currentHolderId = null;
         private readonly Random _random = new Random();
 
+        // ★★★ ゲームフロー管理用タイマー ★★★
+        private int _pauseTimer = 0; // "Goal!" や "MatchEnd" の表示用タイマー
+        private int _frameCounter = 0; // ★★★ 1秒カウント用のフレームカウンター ★★★
+        private const int GOAL_PAUSE_FRAMES = 180; // ゴール後の停止時間 (3秒 * 60fps)
+        // ★★★ ここまで ★★★
+
         // --- 定数定義 (800x600 のオリジナルに戻す) ---
         private const float FIELD_WIDTH = 800f;
         private const float FIELD_HEIGHT = 600f;
         private const int PLAYER_COUNT = 16;
-        private const float GLOBAL_SPEED_FACTOR = 0.7f;
-        private const float PLAYER_SPEED = 2.0f * GLOBAL_SPEED_FACTOR;
+        private const float GLOBAL_SPEED_FACTOR = 0.5f;
+        private const float PLAYER_SPEED =2.0f * GLOBAL_SPEED_FACTOR;
         private const float BALL_DRAG = 0.98f;
         private const float CENTER_Y = FIELD_HEIGHT / 2f;
         private const float SIDE_Y_L = FIELD_HEIGHT * 0.25f;
@@ -33,7 +39,7 @@ namespace SoccerServer.Services
         private const float GOAL_LINE_X_AWAY = FIELD_WIDTH - 30f;
         private const float GOAL_HEIGHT = 50f;
         private const float PLAYER_KICK_RANGE = 10f;
-        private const float BALL_SPEED_FACTOR = 0.96f;
+        private const float BALL_SPEED_FACTOR = 0.70f;
         private const float PLAYER_SHOT_RANGE_DEFAULT = 150f;
         private const float AI_DEFAULT_CHASE_DISTANCE = 130f;
         private const float AI_PASS_RANGE = 250f;
@@ -66,10 +72,48 @@ namespace SoccerServer.Services
             };
 
             InitializePlayers();
-            ResetBallAndPlayers(true);
+            // ★★★ 初期状態を設定 ★★★
+            _gameState.MatchStatus = "WaitingToStart";
+            _gameState.Time = 3 * 60; // 3分
+            ResetBallAndPlayers(true); // 選手を配置
         }
 
         public GameState GetState() => _gameState;
+
+        // --- ★★★ ゲームフロー制御メソッド (ここから) ★★★ ---
+
+        // (クライアントから "START_GAME" で呼び出される)
+        public void StartGame()
+        {
+            if (_gameState.MatchStatus == "WaitingToStart")
+            {
+                _gameState.MatchStatus = "Playing";
+                _kickOffTeam = "home";
+                _frameCounter = 0; // ★ カウンターをリセット
+                ResetForKickoff(true); // キックオフ実行
+            }
+        }
+
+        // (クライアントから "CONTINUE_GAME" で呼び出される)
+        public void ContinueGame()
+        {
+            if (_gameState.MatchStatus == "MatchEnd")
+            {
+                // ゲーム状態をリセット
+                _gameState.Score.Home = 0;
+                _gameState.Score.Away = 0;
+                _gameState.Time = 3 * 60;
+                _gameState.Scorers.Clear();
+                _gameState.MatchEnded = false;
+                _gameState.MatchStatus = "Playing";
+                _kickOffTeam = "home";
+                _frameCounter = 0; // ★ カウンターをリセット
+                ResetForKickoff(true); // キックオフ実行
+            }
+        }
+
+        // --- ★★★ (ここまで) ★★★ ---
+
 
         private float Hypot(float a, float b) => (float)Math.Sqrt(a * a + b * b);
 
@@ -112,13 +156,13 @@ namespace SoccerServer.Services
                     case 5: role = "MF-R"; imageKey = "Takami_home"; displayName = "Takami"; speedMult = 1.8f; dribbleMult = 8; passMult = 15; break;
                     case 14: role = "FW-L"; imageKey = "Zoro_away"; displayName = "Zoro"; speedMult = 1.2f; shotMult = 5; shotRangeMult = 1.3f; break;
                     case 11: role = "MF-C"; imageKey = "Itoshi_away"; displayName = "Itoshi"; dribbleMult = 10; shotRangeMult = 2; passMult = 10; break;
-                    case 12: role = "MF-L"; imageKey = "Kazemaru_away"; displayName = "Kazemaru"; dribbleMult = 10; passMult = 3; speedMult = 2; break;
+                    case 12: role = "MF-L"; imageKey = "Kazemaru_away"; displayName = "Kazemaru"; dribbleMult = 10; passMult = 3; speedMult = 1.5f; break;
                     case 10: role = "DF-R"; imageKey = "Tigiri_away"; displayName = "Tigiri"; speedMult = 1.5f; tackleMult = 20; break;
                     case 4: case 6: case 13: case 15: break;
                 }
 
                 float baseSpeed = 70 + (float)(_random.NextDouble() * 30);
-                float baseShot = 50 + (float)(_random.NextDouble() * 50);
+                float baseShot = 30 + (float)(_random.NextDouble() * 50);
                 float baseDribble = 100 + (float)(_random.NextDouble() * 30);
                 float baseTackle = 70 + (float)(_random.NextDouble() * 30);
                 float finalSpeed = baseSpeed * speedMult;
@@ -172,14 +216,10 @@ namespace SoccerServer.Services
             }
         }
 
-        // --- 移植メソッド: ResetBallAndPlayers ---
+        // --- 移植メソッド: ResetBallAndPlayers (キックオフ処理を分離) ---
         private void ResetBallAndPlayers(bool isInitialStart = false)
         {
-            if (isInitialStart || _gameState.Score.Home > 0 || _gameState.Score.Away > 0)
-            {
-                _gameState.Ball = new BallData { X = FIELD_WIDTH / 2f, Y = FIELD_HEIGHT / 2f, Z = 0, VZ = 0 };
-            }
-
+            // 選手を初期位置に戻す
             foreach (var pair in _gameState.Players)
             {
                 var player = pair.Value;
@@ -193,24 +233,27 @@ namespace SoccerServer.Services
             }
             _currentHolderId = null;
 
-            if (isInitialStart || _gameState.Score.Home > 0 || _gameState.Score.Away > 0)
+            // ボールを中央に
+            _gameState.Ball = new BallData { X = FIELD_WIDTH / 2f, Y = FIELD_HEIGHT / 2f, Z = 0, VZ = 0 };
+        }
+
+        // ★★★ キックオフ専用メソッド (新規) ★★★
+        private void ResetForKickoff(bool executeKickOff = false)
+        {
+            ResetBallAndPlayers(); // 選手とボールを配置
+
+            _gameState.GoalMessage = ""; // "Goal!" メッセージを消す
+
+            if (executeKickOff)
             {
-                _gameState.Ball.X = FIELD_WIDTH / 2;
-                _gameState.Ball.Y = CENTER_Y;
-                _gameState.Ball.Z = 0;
-                _gameState.Ball.VZ = 0;
-
-                Debug.WriteLine($"[Server] Auto-kicking off. Team: {_kickOffTeam}");
-
+                Debug.WriteLine($"[Server] Executing kick off. Team: {_kickOffTeam}");
                 if (_kickOffTeam == "home") { _gameState.Ball.VX = 10 * GLOBAL_SPEED_FACTOR; }
                 else { _gameState.Ball.VX = -10 * GLOBAL_SPEED_FACTOR; }
-
                 _gameState.Ball.VY = (float)(_random.NextDouble() - 0.5) * 24 * GLOBAL_SPEED_FACTOR;
-                _isPaused = false;
             }
         }
 
-        // --- 移植メソッド: UpdatePhysics ---
+        // --- 移植メソッド: UpdatePhysics (ゴール処理は変更なし) ---
         public void UpdatePhysics()
         {
             var ball = _gameState.Ball;
@@ -236,6 +279,7 @@ namespace SoccerServer.Services
             if (ball.Y < 0) { ball.Y = 0; ball.VY *= -1; }
             if (ball.Y > FIELD_HEIGHT) { ball.Y = FIELD_HEIGHT; ball.VY *= -1; }
 
+            // --- ゴール判定 ---
             bool isGoalHome = ball.X > GOAL_LINE_X_AWAY && ball.Y > GOAL_POST_Y_TOP && ball.Y < GOAL_POST_Y_BOTTOM && ball.Z < GOAL_HEIGHT;
             bool isGoalAway = ball.X < GOAL_LINE_X_HOME && ball.Y > GOAL_POST_Y_TOP && ball.Y < GOAL_POST_Y_BOTTOM && ball.Z < GOAL_HEIGHT;
 
@@ -249,8 +293,11 @@ namespace SoccerServer.Services
                     _gameState.Scorers.Add(new ScorerData { PlayerId = _lastScorer, Time = _gameState.Time });
                 }
 
-                ResetBallAndPlayers();
-                return;
+                _gameState.MatchStatus = "GoalScored"; // 状態を「ゴール！」に
+                _gameState.GoalMessage = "GOAL!"; // メッセージを設定
+                _pauseTimer = GOAL_PAUSE_FRAMES; // 3秒タイマーセット
+
+                return; // 物理演算を中断
             }
 
             if (ball.X < 0) { ball.X = 0; ball.VX *= -1; }
@@ -422,7 +469,6 @@ namespace SoccerServer.Services
             {
                 if (teammate.Team == myTeam && teammate.Id != passer.Id && rolesToFind.Any(r => teammate.Role.StartsWith(r)))
                 {
-                    // ★★★ CS0103 エラーを修正 (player.Y -> passer.Y) ★★★
                     float distToPasser = Hypot(passer.X - teammate.X, passer.Y - teammate.Y);
                     if (distToPasser < AI_PASS_RANGE)
                     {
@@ -492,13 +538,11 @@ namespace SoccerServer.Services
                 if (string.IsNullOrEmpty(closestPlayerId)) return;
                 var closer = _gameState.Players[closestPlayerId];
 
-                // ★★★ 修正点: クラッシュ原因 (ArgumentNullException) の回避 ★★★
                 PlayerData current = null;
                 if (!string.IsNullOrEmpty(_currentHolderId))
                 {
                     _gameState.Players.TryGetValue(_currentHolderId, out current);
                 }
-                // ★★★ 修正点 ここまで ★★★
 
                 bool canTouch = (closer.Role == "GK") ?
                                 (_gameState.Ball.Z < GK_CATCH_HEIGHT) :
@@ -543,7 +587,6 @@ namespace SoccerServer.Services
 
                 float distToBall = Hypot(player.X - _gameState.Ball.X, player.Y - _gameState.Ball.Y);
 
-                // ★★★ 修正点: teamHasBall の Null チェック ★★★
                 bool teamHasBall = !string.IsNullOrEmpty(_currentHolderId)
                                    && _gameState.Players.TryGetValue(_currentHolderId, out PlayerData holder)
                                    && holder.Team == myTeam;
@@ -693,17 +736,72 @@ namespace SoccerServer.Services
             }
         }
 
-        // --- UpdateGameのメインロジック ---
+        // --- ★★★ UpdateGameのメインロジック (時間経過ロジックを修正) ★★★
         public void UpdateGame()
         {
-            if (_isPaused || _gameState.MatchEnded) return;
+            if (_isPaused) return;
 
             try
             {
-                UpdateAI();
-                UpdatePhysics();
+                // 試合状況に応じて処理を分岐
+                switch (_gameState.MatchStatus)
+                {
+                    case "Playing":
+                        // 試合中
+                        UpdateAI();
+                        UpdatePhysics();
 
-                if (_gameState.Time > 0) _gameState.Time--;
+                        // ★★★ 60フレームに1回、時間を進める ★★★
+                        _frameCounter++;
+                        if (_frameCounter >= 60)
+                        {
+                            _frameCounter = 0;
+                            if (_gameState.Time > 0)
+                            {
+                                _gameState.Time--;
+                            }
+                        }
+                        // ★★★ 修正ここまで ★★★
+
+                        // 時間が0になったら試合終了
+                        if (_gameState.Time <= 0)
+                        {
+                            // ★ 試合終了処理
+                            _gameState.Time = 0;
+                            _gameState.MatchStatus = "MatchEnd";
+                            _gameState.MatchEnded = true; // 互換性のため
+                            _gameState.GoalMessage = "TIME UP";
+                            _pauseTimer = 300; // 5秒 (Continueボタンが出るまでの待機)
+                        }
+                        break;
+
+                    case "GoalScored":
+                        // ゴール後のポーズ
+                        _pauseTimer--;
+                        if (_pauseTimer <= 0)
+                        {
+                            // ポーズ終了後、キックオフ準備
+                            ResetForKickoff(true); // 選手を配置し、キックオフ
+                            _gameState.MatchStatus = "Playing"; // 試合再開
+                        }
+                        break;
+
+                    case "MatchEnd":
+                        // 試合終了後の待機
+                        _pauseTimer--;
+                        if (_pauseTimer <= 0)
+                        {
+                            // "Continue" ボタンを表示させるための待機
+                            // 特に何もしない (クライアントからの "CONTINUE_GAME" 待ち)
+                        }
+                        break;
+
+                    case "WaitingToStart":
+                    default:
+                        // "Game Start" ボタンが押されるまで待機
+                        // (AIも物理も動かさない)
+                        break;
+                }
             }
             catch (Exception ex)
             {

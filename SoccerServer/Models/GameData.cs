@@ -128,5 +128,15 @@ namespace SoccerServer.Models
         public bool MatchEnded { get; set; } = false;
         [JsonPropertyName("scorers")]
         public List<ScorerData> Scorers { get; set; } = new List<ScorerData>();
+
+        // --- ★★★ ここから追加 ★★★ ---
+
+        [JsonPropertyName("matchStatus")]
+        public string MatchStatus { get; set; } = "WaitingToStart"; // "WaitingToStart", "Playing", "GoalScored", "MatchEnd"
+
+        [JsonPropertyName("goalMessage")]
+        public string GoalMessage { get; set; } = ""; // "GOAL!" などのメッセージ用
+
+        // --- ★★★ 追加ここまで ★★★ ---
     }
 }
