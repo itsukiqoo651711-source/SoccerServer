@@ -92,6 +92,12 @@ namespace SoccerServer.Models
         public float Z { get; set; } = 0;
         [JsonPropertyName("vz")]
         public float VZ { get; set; } = 0;
+
+        // ★★★ NEW ★★★
+        // プレイスタイル ("Balanced", "Dribbler", "Runner", "Passer")
+        [JsonPropertyName("playStyle")]
+        public string PlayStyle { get; set; } = "Balanced";
+        // ★★★ ここまで ★★★
     }
 
     // server.js の gameState.score に対応

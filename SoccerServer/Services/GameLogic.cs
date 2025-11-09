@@ -6,6 +6,7 @@ using System;
 
 namespace SoccerServer.Services
 {
+    // ★★★ クラス定義 (すべてのメソッドがこの { } の内側にある必要があります) ★★★
     public class GameLogic
     {
         // 状態
@@ -27,8 +28,8 @@ namespace SoccerServer.Services
         private const float FIELD_WIDTH = 800f;
         private const float FIELD_HEIGHT = 600f;
         private const int PLAYER_COUNT = 22; // 11 v 11
-        private const float GLOBAL_SPEED_FACTOR = 0.5f;
-        private const float PLAYER_SPEED = 2.0f * GLOBAL_SPEED_FACTOR;
+        private const float GLOBAL_SPEED_FACTOR = 0.25f;
+        private const float PLAYER_SPEED = 1.0f * GLOBAL_SPEED_FACTOR;
         private const float BALL_DRAG = 0.98f;
         private const float CENTER_Y = FIELD_HEIGHT / 2f;
         private const float SIDE_Y_L = FIELD_HEIGHT * 0.25f;
@@ -38,20 +39,27 @@ namespace SoccerServer.Services
         private const float GOAL_LINE_X_HOME = 30f;
         private const float GOAL_LINE_X_AWAY = FIELD_WIDTH - 30f;
         private const float GOAL_HEIGHT = 50f;
-        private const float PLAYER_KICK_RANGE = 10f;
+
+        // --- ★★★ 2.5倍に変更済みの値 ★★★ ---
+        private const float PLAYER_KICK_RANGE = 25f; // ★ 10f -> 25f (2.5倍)
+        private const float AI_FREE_SPACE_DISTANCE = 175f; // ★ 70f -> 175f (2.5倍)
+        private const float AI_PASS_ROUTE_CLEARANCE = 50f; // ★ 20f -> 50f (2.5倍)
+        private const float AI_DRIBBLER_RISK_DISTANCE = 100f;  // ★ 40f -> 100f (2.5倍)
+                                                               // --- ★★★ ここまで ★★★ ---
+
         private const float BALL_SPEED_FACTOR = 0.70f;
         private const float PLAYER_SHOT_RANGE_DEFAULT = 150f;
         private const float AI_PASS_RANGE = 250f;
-        private const float AI_FREE_SPACE_DISTANCE = 70f;
-        private const float AI_PASS_ROUTE_CLEARANCE = 20f;
+
         private const float AI_PASS_SCORE_THRESHOLD = 80f;
         private const float AI_PASS_SCORE_GREAT = 350f;
         private const float AI_DRIBBLE_THRESHOLD = 130f; // ドリブラーかどうかの閾値
         private const float PLAYER_KICK_HEIGHT = 10f;
         private const float GK_CATCH_HEIGHT = 20f;
+
         // ★ ドリブル判断用の定数
         private const float AI_DRIBBLE_SAFE_DISTANCE = 120f; // これ以上離れていれば安全
-        private const float AI_DRIBBLER_RISK_DISTANCE = 40f;  // これより近いとリスク
+
 
         private readonly Dictionary<string, float[]> HOME_POSITIONS;
         private readonly Dictionary<string, float[]> AWAY_POSITIONS;
@@ -202,6 +210,23 @@ namespace SoccerServer.Services
                 float finalTackle = baseTackle * tackleMult;
                 float finalPass = 80 * passMult;
 
+                // ★★★ NEW: プレイスタイルの割り当て ★★★
+                string playStyle = "Balanced";
+                if (finalDribble >= 120) // ドリブルBランク以上
+                {
+                    playStyle = "Dribbler";
+                }
+                else if (role.StartsWith("FW") && finalSpeed >= 100) // スピードCランク以上のFW
+                {
+                    playStyle = "Runner";
+                }
+                else if (role.StartsWith("MF") && finalPass >= 90) // パス能力が高いMF
+                {
+                    playStyle = "Passer";
+                }
+                // ★★★ ここまで ★★★
+
+
                 var positions = isHome ? HOME_POSITIONS : AWAY_POSITIONS;
                 float xPos = (float)(_random.NextDouble() * FIELD_WIDTH);
                 float yPos = (float)(_random.NextDouble() * FIELD_HEIGHT);
@@ -242,7 +267,8 @@ namespace SoccerServer.Services
                         Pas = ToRank(finalPass),
                         Drb = ToRank(finalDribble),
                         Tck = ToRank(finalTackle)
-                    }
+                    },
+                    PlayStyle = playStyle // ★★★ NEW ★★★
                 };
             }
         }
@@ -385,7 +411,7 @@ namespace SoccerServer.Services
                 if (opponent.Team != player.Team)
                 {
                     float dist = Hypot(player.X - opponent.X, player.Y - opponent.Y);
-                    if (dist < AI_FREE_SPACE_DISTANCE)
+                    if (dist < AI_FREE_SPACE_DISTANCE) // ★ 2.5倍になった定数を使用
                     {
                         return false;
                     }
@@ -418,14 +444,14 @@ namespace SoccerServer.Services
             float pX = passer.X, pY = passer.Y;
             float tX = targetPlayer.X, tY = targetPlayer.Y;
             float lineLengthSq = (float)(Math.Pow(tX - pX, 2) + Math.Pow(tY - pY, 2));
-            if (lineLengthSq < (AI_PASS_ROUTE_CLEARANCE * AI_PASS_ROUTE_CLEARANCE)) return true;
+            if (lineLengthSq < (AI_PASS_ROUTE_CLEARANCE * AI_PASS_ROUTE_CLEARANCE)) return true; // ★ 2.5倍になった定数を使用
 
             foreach (var opponent in _gameState.Players.Values)
             {
                 if (opponent.Team == passer.Team) continue;
                 float oX = opponent.X, oY = opponent.Y;
-                if (oX < Math.Min(pX, tX) - AI_PASS_ROUTE_CLEARANCE || oX > Math.Max(pX, tX) + AI_PASS_ROUTE_CLEARANCE ||
-                    oY < Math.Min(pY, tY) - AI_PASS_ROUTE_CLEARANCE || oY > Math.Max(pY, tY) + AI_PASS_ROUTE_CLEARANCE)
+                if (oX < Math.Min(pX, tX) - AI_PASS_ROUTE_CLEARANCE || oX > Math.Max(pX, tX) + AI_PASS_ROUTE_CLEARANCE || // ★ 2.5倍
+                    oY < Math.Min(pY, tY) - AI_PASS_ROUTE_CLEARANCE || oY > Math.Max(pY, tY) + AI_PASS_ROUTE_CLEARANCE) // ★ 2.5倍
                 {
                     continue;
                 }
@@ -436,7 +462,7 @@ namespace SoccerServer.Services
                 else { closestX = pX + t * (tX - pX); closestY = pY + t * (tY - pY); }
 
                 float distToLine = Hypot(oX - closestX, oY - closestY);
-                if (distToLine < AI_PASS_ROUTE_CLEARANCE) return false;
+                if (distToLine < AI_PASS_ROUTE_CLEARANCE) return false; // ★ 2.5倍になった定数を使用
             }
             return true;
         }
@@ -577,7 +603,7 @@ namespace SoccerServer.Services
                 // スペースが空いている (DFがいない)
                 riskBonus = 150f; // ドリブルを強く推奨
             }
-            else if (distToOpponent < AI_DRIBBLER_RISK_DISTANCE && isOpponentInFront)
+            else if (distToOpponent < AI_DRIBBLER_RISK_DISTANCE && isOpponentInFront) // ★ 2.5倍になった定数を使用
             {
                 // 近すぎる (危険)
                 riskBonus = -150f; // パスを強く推奨
@@ -619,7 +645,7 @@ namespace SoccerServer.Services
                 }
             }
 
-            const float basePassPower = 12f;
+            const float basePassPower = 18f;
             float passPower = basePassPower * (player.Stats.Pass / 100f);
             float targetX = targetPlayer.X + targetPlayer.VX * 5;
             float targetY = targetPlayer.Y + targetPlayer.VY * 5;
@@ -656,7 +682,7 @@ namespace SoccerServer.Services
             }
 
             // 2. Determine ball holder (with Z height check)
-            if (minDistance < PLAYER_KICK_RANGE)
+            if (minDistance < PLAYER_KICK_RANGE) // ★ 2.5倍になった定数を使用
             {
                 if (string.IsNullOrEmpty(closestPlayerId)) return;
                 var closer = _gameState.Players[closestPlayerId];
@@ -802,23 +828,36 @@ namespace SoccerServer.Services
                         continue;
                     }
 
-                    // ★★★ 期待値ベースの判断 (Dribble vs Pass) ★★★
+                    // ★★★ MODIFIED: 期待値 + 個性 + 確率 ★★★
 
-                    // 2. Evaluate Dribble
+                    // 2. 評価
                     var nearestOpponent = FindNearestOpponent(player);
                     var dribbleDecision = EvaluateDribble(player, nearestOpponent);
-
-                    // 3. Evaluate Pass
                     var passDecision = FindBestPassTarget(player, new[] { "FW", "MF" });
 
-                    // 4. Compare Scores
-                    if (dribbleDecision.score > passDecision.score)
+                    // 3. ★ NEW: プレイスタイル・ボーナス ★
+                    const float PLAYSTYLE_BONUS = 150f; // 個性を強調するボーナス値
+                    if (player.PlayStyle == "Dribbler")
                     {
-                        // ★ 決定: ドリブル (リスクテイク) ★
+                        dribbleDecision.score += PLAYSTYLE_BONUS;
+                    }
+                    else if (player.PlayStyle == "Passer")
+                    {
+                        passDecision.score += PLAYSTYLE_BONUS;
+                    }
+
+                    // 4. ★ MODIFIED: 確率による行動決定 ★
+                    // 評価値がマイナスになる可能性を考慮し、最低1fを保証する
+                    float scoreD = Math.Max(1f, dribbleDecision.score);
+                    float scoreP = Math.Max(1f, passDecision.score);
+                    float totalScore = scoreD + scoreP;
+                    float dribbleChance = scoreD / totalScore;
+
+                    if ((float)_random.NextDouble() < dribbleChance)
+                    {
+                        // ★ 決定: ドリブル ★
                         player.TargetX = dribbleDecision.targetX;
                         player.TargetY = dribbleDecision.targetY;
-                        Debug.WriteLine($"[Server AI] {player.DisplayName} chose Dribble (Score: {dribbleDecision.score}) over Pass (Score: {passDecision.score})");
-                        continue;
                     }
                     else
                     {
@@ -826,17 +865,16 @@ namespace SoccerServer.Services
                         if (passDecision.target != null)
                         {
                             MakePass(player, passDecision.target);
-                            Debug.WriteLine($"[Server AI] {player.DisplayName} chose Pass (Score: {passDecision.score}) over Dribble (Score: {dribbleDecision.score})");
                         }
                         else
                         {
-                            // パスもダメだった (フォールバック: 回避ドリブル)
+                            // パス相手がいない (フォールバック: 回避ドリブル)
                             player.TargetX = dribbleDecision.targetX;
                             player.TargetY = dribbleDecision.targetY;
                         }
-                        continue;
                     }
-                    // ★★★ 期待値ベースの判断ここまで ★★★
+                    // ★★★ 修正ここまで ★★★
+                    continue;
                 }
                 // --- Non-Ball Holder Logic ---
                 else
@@ -852,12 +890,11 @@ namespace SoccerServer.Services
                     // (フィールドプレイヤー: DF, MF, FW)
                     if (basePos != null)
                     {
-                        // 1. 基本となる「ゾーン」の目標位置を計算
+                        // 1. 基本となる「ゾーン」の目標位置を計算 (守備時の基本位置)
                         float targetX, targetY;
                         float ballOffsetX = (_gameState.Ball.X - (FIELD_WIDTH / 2f));
                         float ballOffsetY = (_gameState.Ball.Y - CENTER_Y);
 
-                        // デフォルトの守備ゾーン
                         float zoneShiftFactor = 0.3f; // DF
                         if (player.Role.StartsWith("MF")) zoneShiftFactor = 0.5f; // MF
                         else if (player.Role.StartsWith("FW")) zoneShiftFactor = 0.2f; // FW
@@ -867,49 +904,31 @@ namespace SoccerServer.Services
                         // ★★★ オフザボールの戦術ロジック (チーム別) ★★★
                         if (myTeamHasBall)
                         {
-                            bool isBallAdvanced = (myTeam == "home") ? (_gameState.Ball.X > FIELD_WIDTH / 2f) : (_gameState.Ball.X < FIELD_WIDTH / 2f);
+                            // ★★★ MODIFIED: プレイスタイルを考慮したスペース探索 ★★★
 
-                            // --- Home (4-2-3-1 ポゼッション/オーバーラップ) ---
-                            if (myTeam == "home")
+                            // FW (FW, FW-W, FW-C) または MF (MF, MF-C) が対象
+                            // (MF-Dは守備的MFなので除外)
+                            if (player.Role.StartsWith("FW") || player.Role == "MF" || player.Role == "MF-C")
                             {
-                                float offensivePush = 100f;
+                                // ★ "Runner" スタイルもここで考慮される
+                                var bestSpace = FindBestOffensiveSpace(player, holder);
+                                targetX = bestSpace.targetX;
+                                targetY = bestSpace.targetY;
+                            }
+                            // ★★★ サイドバックのオーバーラップロジック (Homeチームのみ) ★★★
+                            // (ID 1=LB, 4=RB)
+                            else if (myTeam == "home" && player.Role.StartsWith("DF") && (player.Id == "player1" || player.Id == "player4"))
+                            {
+                                // ボールが敵陣の自分のサイドにあるか
+                                bool isBallAdvanced = (myTeam == "home") ? (_gameState.Ball.X > FIELD_WIDTH / 2f) : (_gameState.Ball.X < FIELD_WIDTH / 2f);
+                                bool isBallOnMyWing = (basePos[1] < CENTER_Y) ? (_gameState.Ball.Y < CENTER_Y - 50f) : (_gameState.Ball.Y > CENTER_Y + 50f);
 
-                                // FW (player10)
-                                if (player.Role.StartsWith("FW"))
+                                if (isBallAdvanced && isBallOnMyWing) // ボールが敵陣の自分のサイドにある
                                 {
-                                    // ★ FW裏抜け: 自分のレーン(basePos[1])の裏へ
-                                    float runTargetX = (holder.X > basePos[0]) ? holder.X + 100f : basePos[0] + 100f; // ホルダーより前、または初期位置より前
-                                    targetX = Math.Min(runTargetX, FIELD_WIDTH - 120f);
-                                    targetY = basePos[1]; // 自分のレーン
+                                    // ★オーバーラップ実行★
+                                    targetX = FIELD_WIDTH - 250f; // 敵陣深くまで上がる
+                                    targetY = basePos[1];
                                 }
-                                // 攻撃的MF (player7, 8, 9)
-                                else if (player.Role.StartsWith("MF") && (player.Id == "player7" || player.Id == "player8" || player.Id == "player9"))
-                                {
-                                    // ★ 2列目からの飛び出し: 自分のレーンの裏へ
-                                    float runTargetX = (holder.X > basePos[0]) ? holder.X + 50f : basePos[0] + 50f;
-                                    targetX = Math.Min(runTargetX, FIELD_WIDTH - 150f);
-                                    targetY = basePos[1]; // 自分のレーン
-                                }
-                                // サイドバック (player1, 4)
-                                else if (player.Role.StartsWith("DF") && (player.Id == "player1" || player.Id == "player4"))
-                                {
-                                    // ★ オーバーラップロジック (ボールの位置基準)
-                                    bool isBallOnMyWing = (basePos[1] < CENTER_Y) ? (_gameState.Ball.Y < CENTER_Y - 50f) : (_gameState.Ball.Y > CENTER_Y + 50f);
-
-                                    if (isBallAdvanced && isBallOnMyWing) // ボールが敵陣の自分のサイドにある
-                                    {
-                                        // ★オーバーラップ実行★
-                                        targetX = FIELD_WIDTH - 250f; // 敵陣深くまで上がる
-                                        targetY = basePos[1];
-                                    }
-                                    else
-                                    {
-                                        // ラインを上げるだけ
-                                        targetX = basePos[0] + offensivePush + (ballOffsetX * 0.2f);
-                                        targetY = basePos[1] + (ballOffsetY * 0.4f);
-                                    }
-                                }
-                                // ボランチとCB (player2, 3, 5, 6)
                                 else
                                 {
                                     // 後方でサポート
@@ -918,30 +937,14 @@ namespace SoccerServer.Services
                                     targetY = basePos[1] + (holder.Y - basePos[1]) * 0.3f;
                                 }
                             }
-                            // --- Away (4-3-3 カウンター) ---
-                            else
+                            // ★★★ CBと守備的MFのサポートロジック (全チーム共通) ★★★
+                            // (CB (DF) または DMF (MF-D))
+                            else if (player.Role == "DF" || player.Role == "MF-D")
                             {
-                                // FWs (19, 20, 21)
-                                if (player.Role.StartsWith("FW"))
-                                {
-                                    // ★カウンターラン★ 常に最前線へ
-                                    targetX = 120f;
-                                    targetY = basePos[1]; // 自分のレーン (LW, CF, RW)
-                                }
-                                // MFs (16, 17, 18)
-                                else if (player.Role.StartsWith("MF"))
-                                {
-                                    // ★カウンターサポート★ FWに続く
-                                    targetX = 200f;
-                                    targetY = basePos[1]; // 自分のレーン
-                                }
-                                // DFs (12, 13, 14, 15)
-                                else
-                                {
-                                    // 4バックはラインを上げる (3バックより少し攻撃的)
-                                    targetX = basePos[0] + ballOffsetX * 0.3f;
-                                    targetY = basePos[1] + ballOffsetY * 0.3f;
-                                }
+                                // 後方でサポート
+                                float supportTargetX = holder.X - 100f;
+                                targetX = Math.Max(supportTargetX, basePos[0]);
+                                targetY = basePos[1] + (holder.Y - basePos[1]) * 0.3f;
                             }
                         }
                         // ★★★ オフザボールの戦術ロジックここまで ★★★
@@ -1000,6 +1003,96 @@ namespace SoccerServer.Services
                 }
             }
         }
+
+        // ★★★ MODIFIED: "Runner" スタイルを考慮 ★★★
+        private (float targetX, float targetY) FindBestOffensiveSpace(PlayerData player, PlayerData holder)
+        {
+            float bestScore = -float.MaxValue;
+            float bestX = player.TargetX; // 見つからなければ現在のターゲットを維持
+            float bestY = player.TargetY;
+
+            string myTeam = player.Team;
+            float enemyGoalX = (myTeam == "home") ? FIELD_WIDTH : 0;
+            float enemyGoalY = CENTER_Y;
+
+            // 探索する「スペース」の候補 (9マス)
+            float[] xCandidates = (myTeam == "home")
+                ? new float[] { 250f, 500f, 700f } // Home: 守備, 中盤, 攻撃
+                : new float[] { 550f, 300f, 100f };// Away: 守備, 中盤, 攻撃
+
+            float[] yCandidates = new float[] { 150f, 300f, 450f };
+
+            const float SPACE_CHECK_RADIUS = 100f; // ★スペース認識範囲 (AI_FREE_SPACE_DISTANCEより小さめ)
+
+            foreach (float x in xCandidates)
+            {
+                foreach (float y in yCandidates)
+                {
+                    float score = 0;
+
+                    // 1. ゴールへの近さで加点
+                    float distToGoal = Hypot(x - enemyGoalX, y - enemyGoalY);
+                    score += (FIELD_WIDTH - distToGoal) * 1.5f; // ゴールに近いほど高評価
+
+                    // 2. ホルダー（ボール）からの距離で減点
+                    float distToHolder = Hypot(x - holder.X, y - holder.Y);
+                    if (distToHolder < 50f) // 近すぎる
+                    {
+                        score -= 500f; // 重複を避ける
+                    }
+                    else
+                    {
+                        score -= distToHolder * 0.5f; // 遠すぎてもパスが通らない
+                    }
+
+                    // 3. 敵からの距離で加点（★スペース認識）
+                    float closestOpponentDist = float.MaxValue;
+                    foreach (var opponent in _gameState.Players.Values)
+                    {
+                        if (opponent.Team != myTeam)
+                        {
+                            float dist = Hypot(x - opponent.X, y - opponent.Y);
+                            if (dist < closestOpponentDist)
+                            {
+                                closestOpponentDist = dist;
+                            }
+                        }
+                    }
+
+                    if (closestOpponentDist > SPACE_CHECK_RADIUS)
+                    {
+                        score += 300f; // ★フリースペースボーナス
+                    }
+                    else
+                    {
+                        score += closestOpponentDist; // 少しでも離れている方が良い
+                    }
+
+                    // ★★★ NEW: "Runner" プレイスタイルボーナス ★★★
+                    if (player.PlayStyle == "Runner")
+                    {
+                        // "Runner" は、最もゴールに近いX座標 (攻撃ライン) を強く選好する
+                        if ((myTeam == "home" && x == 700f) || (myTeam == "away" && x == 100f))
+                        {
+                            score += 200f; // ★裏抜けボーナス
+                        }
+                    }
+                    // ★★★ ここまで ★★★
+
+
+                    // 4. 最高のスコアを更新
+                    if (score > bestScore)
+                    {
+                        bestScore = score;
+                        bestX = x;
+                        bestY = y;
+                    }
+                }
+            }
+
+            return (bestX, bestY);
+        }
+        // ★★★ 変更ここまで ★★★
 
         // --- ★★★ UpdateGameのメインロジック (エラー修正済み) ★★★
         public void UpdateGame()
@@ -1074,5 +1167,5 @@ namespace SoccerServer.Services
                 _isPaused = true;
             }
         }
-    }
-}
+    } // ★★★ ここが GameLogic クラスの終わりの } ★★★
+} // ★★★ ここが namespace の終わりの } ★★★
