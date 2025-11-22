@@ -28,7 +28,7 @@ namespace SoccerServer.Services
         private const float FIELD_WIDTH = 800f;
         private const float FIELD_HEIGHT = 600f;
         private const int PLAYER_COUNT = 22; // 11 v 11
-        private const float GLOBAL_SPEED_FACTOR = 0.25f;
+        private const float GLOBAL_SPEED_FACTOR = 0.5f;
         private const float PLAYER_SPEED = 1.0f * GLOBAL_SPEED_FACTOR;
         private const float BALL_DRAG = 0.98f;
         private const float CENTER_Y = FIELD_HEIGHT / 2f;
@@ -645,7 +645,7 @@ namespace SoccerServer.Services
                 }
             }
 
-            const float basePassPower = 18f;
+            const float basePassPower = 30f;
             float passPower = basePassPower * (player.Stats.Pass / 100f);
             float targetX = targetPlayer.X + targetPlayer.VX * 5;
             float targetY = targetPlayer.Y + targetPlayer.VY * 5;
